@@ -1,10 +1,10 @@
 #####################################################################################################################################################
 # Creates pseudo distributed hadoop 2.7.1
 #
-# docker build --rm -t rtzan/hadoop:2.7.1 .
-# docker build --rm --build-arg http_proxy=$http_proxy -t rtzan/hadoop:2.7.1 .
+# docker build --rm -t rtzan/apache-camel .
+# docker build --rm --build-arg http_proxy=$http_proxy -t rtzan/apache-camel .
 # 
-# docker run -it rtzan/hadoop:2.7.1 /etc/bootstrap.sh -bash
+# docker run -it rtzan/apache-camel /etc/bootstrap.sh -bash
 # 
 #####################################################################################################################################################
 FROM rtzan/pam:centos-6.5
@@ -24,34 +24,62 @@ RUN touch /var/lib/rpm/* \
 # install dev tools
 RUN yum clean all; \
     rpm --rebuilddb; \
-    yum install -y curl which tar sudo openssh-server openssh-clients rsync initscripts
+    yum install -y curl which tar sudo openssh-server openssh-clients rsync wget initscripts
 # 
 # update libselinux. see https://github.com/sequenceiq/hadoop-docker/issues/14
 RUN yum update -y libselinux \
     && yum clean all
-# 
-# passwordless ssh
+#====================================================================================================================================================
+# PASSWORD-LESS ssh
 RUN ssh-keygen -q -N "" -t dsa -f /etc/ssh/ssh_host_dsa_key
 RUN ssh-keygen -q -N "" -t rsa -f /etc/ssh/ssh_host_rsa_key
 RUN ssh-keygen -q -N "" -t rsa -f /root/.ssh/id_rsa
 RUN cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys
-# 
-# TO use ssh amd sftp with password
-# RUN yum reinstall cracklib-dicts
-# 
-# java
-RUN yum -y install java-1.8.0-openjdk-devel.x86_64 && yum clean all
-COPY config_files/java_env.sh /etc/profile.d/java_env.sh
-# 
+#====================================================================================================================================================
+# JAVA    ===========================================================================================================================================
+# download/copy JDK. Comment one of these. The curl command can be retrieved
+# from https://lv.binarybabel.org/catalog/java/jdk8
+#RUN curl --insecure -LOH 'Cookie: oraclelicense=accept-securebackup-cookie' 'http://download.oracle.com/otn-pub/java/jdk/8u131-b11/d54c1d3a095b4ff2b6607d096fa80163/jdk-8u131-linux-x64.rpm'
+COPY local_files/jdk-8u221-linux-x64.rpm /
+
+RUN rpm -i jdk-8u221-linux-x64.rpm
+RUN rm jdk-8u221-linux-x64.rpm
+
+#RUN yum -y install java-1.8.0-openjdk-devel.x86_64 && yum clean all
+
+ENV JAVA_HOME /usr/java/default
+ENV PATH $PATH:$JAVA_HOME/bin
+RUN rm /usr/bin/java && ln -s $JAVA_HOME/bin/java /usr/bin/java
+#====================================================================================================================================================
+#====================================================================================================================================================
+# MAVEN   ===========================================================================================================================================
+#RUN curl --insecure -L https://archive.apache.org/dist/maven/maven-3/3.5.0/binaries/apache-maven-3.5.0-bin.tar.gz | tar -xz -C /usr/local
+COPY local_files/apache-maven-3.5.0-bin.tar.gz /tmp/apache-maven-3.5.0-bin.tar.gz
+RUN tar -xzf /tmp/apache-maven-3.5.0-bin.tar.gz -C /usr/local
+
+RUN cd /usr/local && ln -s ./apache-maven-3.5.0/ maven
+ENV PATH $PATH:/usr/local/maven/bin
+
+#COPY config_files/mvn_settings.xml /usr/local/maven/conf/settings.xml
+
+#====================================================================================================================================================
+# HADOOP  ===========================================================================================================================================
 # download native support
 RUN mkdir -p /tmp/native
-RUN curl --insecure -L https://github.com/sequenceiq/docker-hadoop-build/releases/download/v2.7.1/hadoop-native-64-2.7.1.tgz | tar -xz -C /tmp/native
+#RUN curl --insecure -L https://github.com/sequenceiq/docker-hadoop-build/releases/download/v2.7.1/hadoop-native-64-2.7.1.tgz | tar -xz -C /tmp/native
+COPY local_files/jdk-8u221-linux-x64.rpm /tmp/native
 # 
 # hadoop
-RUN curl --insecure -s https://archive.apache.org/dist/hadoop/common/hadoop-2.7.1/hadoop-2.7.1.tar.gz | tar -xz -C /usr/local/
-RUN cd /usr/local && ln -s ./hadoop-2.7.1 hadoop
-# 
+# download/copy hadoop. Choose one of these options
 ENV HADOOP_PREFIX /usr/local/hadoop
+RUN curl --insecure -s https://archive.apache.org/dist/hadoop/common/hadoop-2.7.1/hadoop-2.7.1.tar.gz | tar -xz -C /usr/local/
+#COPY local_files/hadoop-2.7.1.tar.gz $HADOOP_PREFIX-2.7.1.tar.gz
+#RUN tar -xzvf $HADOOP_PREFIX-2.7.1.tar.gz -C /usr/local
+
+RUN cd /usr/local \
+    && ln -s ./hadoop-2.7.1 hadoop \
+    && chown root:root -R hadoop/
+
 #====================================================================================================================================================
 ENV HADOOP_COMMON_HOME $HADOOP_PREFIX
 ENV HADOOP_HDFS_HOME $HADOOP_PREFIX
@@ -86,6 +114,9 @@ RUN $HADOOP_PREFIX/bin/hdfs namenode -format
 RUN rm -rf /usr/local/hadoop/lib/native
 RUN mv /tmp/native /usr/local/hadoop/lib
 # 
+#====================================================================================================================================================
+
+
 ADD config_files/ssh_config /root/.ssh/config
 RUN chmod 600 /root/.ssh/config
 RUN chown root:root /root/.ssh/config
@@ -100,11 +131,10 @@ RUN chown root:root /root/.ssh/config
 # ADD supervisord.conf /etc/supervisord.conf
 # --------------------------------------------------
 # 
-ADD bootstrap.sh /etc/bootstrap.sh
-RUN chown root:root /etc/bootstrap.sh
-RUN chmod 700 /etc/bootstrap.sh
-# 
 ENV BOOTSTRAP /etc/bootstrap.sh
+ADD bootstrap.sh $BOOTSTRAP
+RUN chown root:root $BOOTSTRAP
+RUN chmod 700 $BOOTSTRAP
 # 
 # --------------------------------------------------
 # working around docker.io build error
@@ -124,14 +154,14 @@ RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PRE
 CMD ["/etc/bootstrap.sh", "-d"]
 
 #====================================================================================================================================================
-# Hdfs ports
+# HDFS ports
 EXPOSE 50010 50020 50070 50075 50090 8020 9000
 # Mapred ports
 EXPOSE 10020 19888
-#Yarn ports
+# Yarn ports
 EXPOSE 8030 8031 8032 8033 8040 8042 8088
-#SSHD port
+# SSHD port
 EXPOSE 2122
-#Other ports
+# Other ports
 EXPOSE 49707
 #####################################################################################################################################################
