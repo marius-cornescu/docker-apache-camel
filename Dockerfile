@@ -6,6 +6,12 @@
 # 
 # docker run -it rtzan/apache-camel /etc/bootstrap.sh -bash
 # 
+# 
+# 
+# docker run -it  -v c:/R/STUDY/m2_repo:/tmp/.m2/repository -v c:/R/STUDY/apache-camel:/home/source rtzan/apache-camel -bash
+# 
+# docker run -it  -v c:/R/STUDY/m2_repo:/tmp/.m2/repository -v c:/R/STUDY/apache-camel:/home/source rtzan/apache-camel /etc/bootstrap.sh -bash
+# 
 #####################################################################################################################################################
 FROM rtzan/pam:centos-6.5
 MAINTAINER rtzan
@@ -47,7 +53,7 @@ RUN rm jdk-8u221-linux-x64.rpm
 
 #RUN yum -y install java-1.8.0-openjdk-devel.x86_64 && yum clean all
 
-ENV JAVA_HOME /usr/java/default
+ENV JAVA_HOME /usr/java/jdk1.8.0_221-amd64
 ENV PATH $PATH:$JAVA_HOME/bin
 RUN rm /usr/bin/java && ln -s $JAVA_HOME/bin/java /usr/bin/java
 #====================================================================================================================================================
@@ -60,7 +66,16 @@ RUN tar -xzf /tmp/apache-maven-3.5.0-bin.tar.gz -C /usr/local
 RUN cd /usr/local && ln -s ./apache-maven-3.5.0/ maven
 ENV PATH $PATH:/usr/local/maven/bin
 
-#COPY config_files/mvn_settings.xml /usr/local/maven/conf/settings.xml
+COPY config_files/mvn_settings.xml /usr/local/maven/conf/settings.xml
+
+RUN mkdir -p /tmp/.m2/repository
+
+ENV MAVEN_OPTS '-Xms2048m -Xmx3584m'
+
+#====================================================================================================================================================
+# SOURCE CODE =======================================================================================================================================
+
+RUN mkdir -p /home/source
 
 #====================================================================================================================================================
 # HADOOP  ===========================================================================================================================================
@@ -72,9 +87,9 @@ COPY local_files/jdk-8u221-linux-x64.rpm /tmp/native
 # hadoop
 # download/copy hadoop. Choose one of these options
 ENV HADOOP_PREFIX /usr/local/hadoop
-RUN curl --insecure -s https://archive.apache.org/dist/hadoop/common/hadoop-2.7.1/hadoop-2.7.1.tar.gz | tar -xz -C /usr/local/
-#COPY local_files/hadoop-2.7.1.tar.gz $HADOOP_PREFIX-2.7.1.tar.gz
-#RUN tar -xzvf $HADOOP_PREFIX-2.7.1.tar.gz -C /usr/local
+#RUN curl --insecure -s https://archive.apache.org/dist/hadoop/common/hadoop-2.7.1/hadoop-2.7.1.tar.gz | tar -xz -C /usr/local/
+COPY local_files/hadoop-2.7.1.tar.gz $HADOOP_PREFIX-2.7.1.tar.gz
+RUN tar -xzvf $HADOOP_PREFIX-2.7.1.tar.gz -C /usr/local
 
 RUN cd /usr/local \
     && ln -s ./hadoop-2.7.1 hadoop \
@@ -88,7 +103,7 @@ ENV HADOOP_YARN_HOME $HADOOP_PREFIX
 ENV HADOOP_CONF_DIR $HADOOP_PREFIX/etc/hadoop
 ENV YARN_CONF_DIR $HADOOP_PREFIX/etc/hadoop
 # 
-RUN sed -i '/^export JAVA_HOME/ s:.*:export JAVA_HOME=/etc/alternatives/java_sdk\nexport HADOOP_PREFIX=/usr/local/hadoop\nexport HADOOP_HOME=/usr/local/hadoop\n:' $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
+RUN sed -i '/^export JAVA_HOME/ s:.*:export JAVA_HOME=/usr/java/jdk1.8.0_221-amd64\nexport HADOOP_PREFIX=/usr/local/hadoop\nexport HADOOP_HOME=/usr/local/hadoop\n:' $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
 RUN sed -i '/^export HADOOP_CONF_DIR/ s:.*:export HADOOP_CONF_DIR=/usr/local/hadoop/etc/hadoop/:' $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
 RUN . $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
 # 
@@ -108,7 +123,7 @@ ADD config_files/yarn-site.xml $HADOOP_PREFIX/etc/hadoop/yarn-site.xml
 #RUN mkdir -p /root/tez
 #RUN curl -s http://www-eu.apache.org/dist/tez/0.8.5/apache-tez-0.8.5-bin.tar.gz | tar -xz -C /root/tez
 # 
-RUN $HADOOP_PREFIX/bin/hdfs namenode -format
+#RUN $HADOOP_PREFIX/bin/hdfs namenode -format
 # 
 # fixing the libhadoop.so like a boss
 RUN rm -rf /usr/local/hadoop/lib/native
@@ -148,10 +163,14 @@ RUN sed  -i "/^[^#]*UsePAM/ s/.*/#&/"  /etc/ssh/sshd_config
 RUN echo "UsePAM no" >> /etc/ssh/sshd_config
 RUN echo "Port 2122" >> /etc/ssh/sshd_config
 
-RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PREFIX/sbin/start-dfs.sh && $HADOOP_PREFIX/bin/hdfs dfs -mkdir -p /user/root
-RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PREFIX/sbin/start-dfs.sh && $HADOOP_PREFIX/bin/hdfs dfs -put $HADOOP_PREFIX/etc/hadoop/ input
+#RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PREFIX/sbin/start-dfs.sh && $HADOOP_PREFIX/bin/hdfs dfs -mkdir -p /user/root
+#RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PREFIX/sbin/start-dfs.sh && $HADOOP_PREFIX/bin/hdfs dfs -put $HADOOP_PREFIX/etc/hadoop/ input
 
 CMD ["/etc/bootstrap.sh", "-d"]
+
+#====================================================================================================================================================
+
+ENV PS1 '\[\e]0;\w\a\]\n\[\e[32m\]\u@\[\e[33m\][\w]\[\e[0m\] \$'
 
 #====================================================================================================================================================
 # HDFS ports
